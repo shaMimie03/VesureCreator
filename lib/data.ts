@@ -1,9 +1,12 @@
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import type { ActivityLog, AppSettings, ContactLog, Creator, Product, Template } from "@/types/db";
+import type { ActivityLog, AppSettings, ContactLog, Creator, CreatorStatus, Product, Template } from "@/types/db";
 
 const hasSupabaseConfig =
   Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
-  Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  );
 
 const emptySettings: AppSettings = {
   brand: {
@@ -24,79 +27,109 @@ const emptySettings: AppSettings = {
 export async function getCreators(): Promise<Creator[]> {
   if (!hasSupabaseConfig) return [];
 
-  try {
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("creators").select("*").order("created_at", { ascending: false });
-
-    if (error || !data) return [];
-    return data as Creator[];
-  } catch {
-    return [];
+  const supabase = await createServerSupabaseClient();
+  const creators: Creator[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await supabase
+      .from("creators")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .range(offset, offset + 999);
+    if (error) throw new Error(`Could not load creators: ${error.message}`);
+    const page = (data ?? []) as Creator[];
+    creators.push(...page);
+    if (page.length < 1000) return creators;
   }
 }
 
 export async function getProducts(): Promise<Product[]> {
   if (!hasSupabaseConfig) return [];
 
-  try {
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("products").select("*").order("created_at", { ascending: false });
-
-    if (error || !data) return [];
-    return data as Product[];
-  } catch {
-    return [];
-  }
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase.from("products").select("*").order("created_at", { ascending: false });
+  if (error) throw new Error(`Could not load products: ${error.message}`);
+  return (data ?? []) as Product[];
 }
 
 export async function getTemplates(): Promise<Template[]> {
   if (!hasSupabaseConfig) return [];
 
-  try {
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("templates").select("*").order("created_at", { ascending: false });
-
-    if (error || !data) return [];
-    return data as Template[];
-  } catch {
-    return [];
-  }
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase.from("templates").select("*").order("created_at", { ascending: false });
+  if (error) throw new Error(`Could not load templates: ${error.message}`);
+  return (data ?? []) as Template[];
 }
 
 export async function getSettings(): Promise<AppSettings> {
   if (!hasSupabaseConfig) return emptySettings;
 
-  try {
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("settings").select("key, value");
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase.from("settings").select("key, value");
+  if (error) throw new Error(`Could not load settings: ${error.message}`);
 
-    if (error || !data) return emptySettings;
+  const settingsObject = Object.fromEntries(
+    (data ?? []).map((item) => [item.key, item.value]),
+  ) as Partial<AppSettings>;
 
-    const settingsObject = Object.fromEntries(
-      (data ?? []).map((item) => [item.key, item.value]),
-    ) as Partial<AppSettings>;
-
-    return {
-      brand: settingsObject.brand ?? emptySettings.brand,
-      commission: settingsObject.commission ?? emptySettings.commission,
-      follow_up_days: settingsObject.follow_up_days ?? emptySettings.follow_up_days,
-    };
-  } catch {
-    return emptySettings;
-  }
+  return {
+    brand: settingsObject.brand ?? emptySettings.brand,
+    commission: settingsObject.commission ?? emptySettings.commission,
+    follow_up_days: settingsObject.follow_up_days ?? emptySettings.follow_up_days,
+  };
 }
 
 export async function getDashboardData() {
   const creators = await getCreators();
   const activity = await getActivityLog();
   const settings = await getSettings();
+  const statuses: CreatorStatus[] = [
+    "Not Contacted",
+    "Invited",
+    "Follow-up 1 Sent",
+    "Follow-up 2 Sent",
+    "Replied",
+    "Agreed",
+    "TAP Link Sent",
+    "Sample Sent",
+    "Sample Delivered",
+    "Content Posted",
+    "Active",
+    "Rejected",
+    "Cold Lead",
+  ];
+  const statusBreakdown = statuses.map((status) => ({
+    name: status,
+    value: creators.filter((creator) => creator.status === status).length,
+  }));
+  const categoryTotals = new Map<string, number>();
+  creators.forEach((creator) => {
+    categoryTotals.set(creator.category, (categoryTotals.get(creator.category) ?? 0) + 1);
+  });
+  const categoryBreakdown = [...categoryTotals.entries()]
+    .map(([name, count]) => ({
+      name,
+      value: creators.length ? Math.round((count / creators.length) * 100) : 0,
+    }))
+    .sort((left, right) => right.value - left.value);
+  const now = Date.now();
+  const firstFollowUpCutoff = now - settings.follow_up_days.first * 24 * 60 * 60 * 1000;
+  const secondFollowUpCutoff = now - settings.follow_up_days.second * 24 * 60 * 60 * 1000;
+  const dueToday = creators.filter((creator) => {
+    if (!creator.last_contact_at) return false;
+    const lastContact = new Date(creator.last_contact_at).getTime();
+    if (creator.status === "Invited") return lastContact <= firstFollowUpCutoff;
+    if (creator.status === "Follow-up 1 Sent") return lastContact <= secondFollowUpCutoff;
+    return false;
+  });
 
   return {
     totalCreators: creators.length,
     invitedCount: creators.filter((creator) => creator.status === "Invited").length,
     repliedCount: creators.filter((creator) => creator.status === "Replied").length,
     activeCount: creators.filter((creator) => creator.status === "Active").length,
-    dueToday: creators.filter((creator) => creator.status === "Invited"),
+    dueToday,
+    statusBreakdown,
+    categoryBreakdown,
     activity,
     settings,
   };
@@ -105,51 +138,35 @@ export async function getDashboardData() {
 export async function getActivityLog(): Promise<ActivityLog[]> {
   if (!hasSupabaseConfig) return [];
 
-  try {
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("activity_log").select("*").order("created_at", { ascending: false }).limit(10);
-    if (error || !data) return [];
-    return data as ActivityLog[];
-  } catch {
-    return [];
-  }
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase.from("activity_log").select("*").order("created_at", { ascending: false }).limit(10);
+  if (error) throw new Error(`Could not load recent activity: ${error.message}`);
+  return (data ?? []) as ActivityLog[];
 }
 
 export async function getCreatorById(id: string): Promise<Creator | null> {
   if (!hasSupabaseConfig) return null;
 
-  try {
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("creators").select("*").eq("id", id).maybeSingle();
-    if (error || !data) return null;
-    return data as Creator;
-  } catch {
-    return null;
-  }
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase.from("creators").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(`Could not load creator: ${error.message}`);
+  return data as Creator | null;
 }
 
 export async function getContactLogByCreatorId(creatorId: string): Promise<ContactLog[]> {
   if (!hasSupabaseConfig) return [];
 
-  try {
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("contact_log").select("*").eq("creator_id", creatorId).order("sent_at", { ascending: false });
-    if (error || !data) return [];
-    return data as ContactLog[];
-  } catch {
-    return [];
-  }
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase.from("contact_log").select("*").eq("creator_id", creatorId).order("sent_at", { ascending: false });
+  if (error) throw new Error(`Could not load creator contact history: ${error.message}`);
+  return (data ?? []) as ContactLog[];
 }
 
 export async function getProductById(id: string): Promise<Product | null> {
   if (!hasSupabaseConfig) return null;
 
-  try {
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.from("products").select("*").eq("id", id).maybeSingle();
-    if (error || !data) return null;
-    return data as Product;
-  } catch {
-    return null;
-  }
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase.from("products").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(`Could not load assigned product: ${error.message}`);
+  return data as Product | null;
 }

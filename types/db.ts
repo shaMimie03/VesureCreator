@@ -76,9 +76,10 @@ export type ContactLog = {
   id: string;
   creator_id: string;
   channel: string;
-  template_id: string;
+  template_id: string | null;
   message_body: string;
-  sent_at: string;
+  sent_at: string | null;
+  status?: "pending_send" | "sent";
   replied: boolean;
   replied_at: string | null;
   reply_body: string | null;

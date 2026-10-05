@@ -1,105 +1,148 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
-import { Table, TableCell, TableHead, TableRow } from "@/components/ui/table";
-import { getCreators } from "@/lib/data";
-import { formatNumber, toMytDate } from "@/lib/utils";
+import { CreatorListTable } from "@/components/creators/creator-list-table";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { CREATOR_CATEGORIES, CREATOR_SOURCES, CREATOR_STATUSES } from "@/lib/creators/constants";
+import type { Creator } from "@/types/db";
 
-export default async function CreatorsPage() {
-  const creators = await getCreators();
+const PAGE_SIZE = 50;
+type SearchParams = Promise<Record<string, string | string[] | undefined>>;
+
+function singleParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
+function pageHref(page: number, filters: Record<string, string>) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value);
+  }
+  if (page > 1) params.set("page", String(page));
+  const query = params.toString();
+  return `/creators${query ? `?${query}` : ""}`;
+}
+
+export default async function CreatorsPage({ searchParams }: { searchParams: SearchParams }) {
+  const params = await searchParams;
+  const filters = {
+    q: singleParam(params.q).replace(/[^a-zA-Z0-9 ._@+-]/g, "").trim().slice(0, 100),
+    status: singleParam(params.status),
+    category: singleParam(params.category),
+    pic: singleParam(params.pic).replace(/[,%()]/g, "").trim().slice(0, 100),
+    source: singleParam(params.source),
+    sort: ["created_at", "last_contact_at", "follower_count"].includes(singleParam(params.sort))
+      ? singleParam(params.sort)
+      : "created_at",
+  };
+  const requestedPage = Number.parseInt(singleParam(params.page), 10);
+  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+
+  let creators: Creator[] = [];
+  let total = 0;
+  let loadError = "";
+
+  try {
+    const supabase = await createServerSupabaseClient();
+    let query = supabase.from("creators").select("*", { count: "exact" });
+    if (filters.q) query = query.or(`creator_name.ilike.%${filters.q}%,tiktok_handle.ilike.%${filters.q}%,whatsapp_number.ilike.%${filters.q}%`);
+    if (CREATOR_STATUSES.includes(filters.status as (typeof CREATOR_STATUSES)[number])) {
+      query = query.eq("status", filters.status);
+    }
+    if (CREATOR_CATEGORIES.includes(filters.category as (typeof CREATOR_CATEGORIES)[number])) {
+      query = query.eq("category", filters.category);
+    }
+    if (filters.pic) query = query.ilike("pic", `%${filters.pic}%`);
+    if (CREATOR_SOURCES.includes(filters.source as (typeof CREATOR_SOURCES)[number])) {
+      query = query.eq("source", filters.source);
+    }
+    const { data, count, error } = await query
+      .order(filters.sort, { ascending: false, nullsFirst: false })
+      .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1);
+    if (error) {
+      loadError = `Could not load creators: ${error.message}`;
+    } else {
+      creators = (data ?? []) as Creator[];
+      total = count ?? 0;
+    }
+  } catch (error) {
+    loadError = error instanceof Error ? error.message : "Could not connect to the creator database.";
+  }
+
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const preservedFilters = { ...filters };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-sm font-medium text-violet-600">Creator CRM</p>
           <h1 className="text-3xl font-bold tracking-tight">Creators</h1>
+          <p className="mt-1 text-sm text-slate-500">{total.toLocaleString()} creator{total === 1 ? "" : "s"}</p>
         </div>
-        <Link href="/creators/new">
-          <Button>Add Creator</Button>
-        </Link>
+        <Link href="/creators/new"><Button>Add Creator</Button></Link>
       </div>
 
       <Card className="p-4">
-        <div className="grid gap-3 md:grid-cols-4">
+        <form className="grid gap-3 md:grid-cols-3 xl:grid-cols-6" action="/creators">
+          <div className="xl:col-span-2">
+            <label htmlFor="creator-search" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Search name, handle, or phone</label>
+            <input id="creator-search" name="q" defaultValue={filters.q} placeholder="Name, TikTok handle, or WhatsApp" className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2" />
+          </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Status</label>
-            <select className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2">
-              <option>All</option>
-              <option>Not Contacted</option>
-              <option>Invited</option>
-              <option>Replied</option>
-              <option>Active</option>
+            <label htmlFor="creator-status" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Status</label>
+            <select id="creator-status" name="status" defaultValue={filters.status} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2">
+              <option value="">All statuses</option>
+              {CREATOR_STATUSES.map((status) => <option key={status}>{status}</option>)}
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Category</label>
-            <select className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2">
-              <option>All</option>
-              <option>Health</option>
-              <option>Beauty</option>
-              <option>Fashion</option>
+            <label htmlFor="creator-category" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Category</label>
+            <select id="creator-category" name="category" defaultValue={filters.category} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2">
+              <option value="">All categories</option>
+              {CREATOR_CATEGORIES.map((category) => <option key={category}>{category}</option>)}
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">PIC</label>
-            <select className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2">
-              <option>All</option>
-              <option>Nadia</option>
-              <option>Yasmin</option>
-              <option>Aisha</option>
-            </select>
+            <label htmlFor="creator-pic" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">PIC</label>
+            <input id="creator-pic" name="pic" defaultValue={filters.pic} placeholder="Search PIC" className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2" />
+          </div>
+          <div className="flex items-end gap-2">
+            <div className="min-w-0 flex-1">
+              <label htmlFor="creator-source" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Source</label>
+              <select id="creator-source" name="source" defaultValue={filters.source} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <option value="">All sources</option>
+                {CREATOR_SOURCES.map((source) => <option key={source}>{source}</option>)}
+              </select>
+            </div>
+            <Button type="submit">Filter</Button>
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Search</label>
-            <input placeholder="Name or handle" className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2" />
+            <label htmlFor="creator-sort" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Sort by</label>
+            <select id="creator-sort" name="sort" defaultValue={filters.sort} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2">
+              <option value="created_at">Created date</option>
+              <option value="last_contact_at">Last contact</option>
+              <option value="follower_count">Follower count</option>
+            </select>
           </div>
-        </div>
+        </form>
       </Card>
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <Table>
-            <thead>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Handle</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Followers</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>PIC</TableHead>
-                <TableHead>Last Contact</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </thead>
-            <tbody>
-              {creators.map((creator) => (
-                <TableRow key={creator.id}>
-                  <TableCell>
-                    <Link href={`/creators/${creator.id}`} className="font-medium text-slate-900 hover:text-violet-700">
-                      {creator.creator_name}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{creator.tiktok_handle}</TableCell>
-                  <TableCell>{creator.category}</TableCell>
-                  <TableCell>{formatNumber(creator.follower_count)}</TableCell>
-                  <TableCell>
-                    <Badge className="bg-violet-50 text-violet-700">{creator.status}</Badge>
-                  </TableCell>
-                  <TableCell>{creator.pic}</TableCell>
-                  <TableCell>{toMytDate(creator.last_contact_at)}</TableCell>
-                  <TableCell className="space-x-2">
-                    <Link href={`/creators/${creator.id}`} className="text-sm text-violet-700">
-                      View
-                    </Link>
-                    <button className="text-sm text-slate-600">Assign</button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </tbody>
-          </Table>
-        </div>
-      </Card>
+      {loadError ? (
+        <Card className="border-red-200 bg-red-50 text-sm text-red-800" role="alert">{loadError}</Card>
+      ) : (
+        <>
+          <CreatorListTable creators={creators} />
+          <div className="flex items-center justify-between gap-4 text-sm text-slate-600">
+            <span>Showing {total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}</span>
+            <div className="flex items-center gap-2">
+              <Link aria-disabled={page <= 1} className={`rounded-md border px-3 py-2 ${page <= 1 ? "pointer-events-none opacity-40" : "hover:bg-slate-50"}`} href={pageHref(Math.max(1, page - 1), preservedFilters)}>Previous</Link>
+              <span>Page {page} of {pageCount}</span>
+              <Link aria-disabled={page >= pageCount} className={`rounded-md border px-3 py-2 ${page >= pageCount ? "pointer-events-none opacity-40" : "hover:bg-slate-50"}`} href={pageHref(Math.min(pageCount, page + 1), preservedFilters)}>Next</Link>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

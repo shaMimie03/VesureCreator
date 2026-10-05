@@ -8,22 +8,18 @@ import { toMytDate } from "@/lib/utils";
 const chartColors = ["#7c3aed", "#8b5cf6", "#c4b5fd", "#fbbf24", "#f97316", "#94a3b8"];
 
 export default async function DashboardPage() {
-  const { totalCreators, invitedCount, repliedCount, activeCount, dueToday, activity, settings } = await getDashboardData();
-
-  const statusBreakdown = [
-    { name: "Not Contacted", value: totalCreators },
-    { name: "Invited", value: invitedCount },
-    { name: "Replied", value: repliedCount },
-    { name: "Active", value: activeCount },
-  ];
-
-  const categoryBreakdown = [
-    { name: "Beauty", value: 22 },
-    { name: "Health", value: 18 },
-    { name: "Fashion", value: 14 },
-    { name: "Food", value: 10 },
-    { name: "Other", value: 9 },
-  ];
+  const {
+    totalCreators,
+    invitedCount,
+    repliedCount,
+    activeCount,
+    dueToday,
+    activity,
+    settings,
+    statusBreakdown,
+    categoryBreakdown,
+  } = await getDashboardData();
+  const maxStatusValue = Math.max(1, ...statusBreakdown.map((status) => status.value));
 
   const statCards = [
     { label: "Total Creators", value: totalCreators, tone: "violet" },
@@ -68,7 +64,7 @@ export default async function DashboardPage() {
                   <span className="font-medium text-slate-800">{entry.value}</span>
                 </div>
                 <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
-                  <div className="h-full rounded-full bg-violet-500" style={{ width: `${(entry.value / 18) * 100}%` }} />
+                  <div className="h-full rounded-full bg-violet-500" style={{ width: `${(entry.value / maxStatusValue) * 100}%` }} />
                 </div>
               </div>
             ))}
