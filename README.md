@@ -77,14 +77,17 @@ replace the placeholders in `.env.example` with real credentials.
    to `http://localhost:3000`.
 2. Add `http://localhost:3000/auth/callback` to the allowed redirect URLs.
    Add the corresponding callback URL for each deployed application origin.
-3. Enable the email provider and configure email delivery in Supabase.
-4. Invite or create approved users in **Authentication → Users**. The
-   application requests magic links without enabling open account creation.
-5. Start the app, open `/login`, and sign in with an existing user's email.
-   Open the emailed link in the same browser/device to complete sign-in.
+3. Enable the email provider, password sign-in, and email delivery in Supabase.
+4. Invite approved users through **Authentication → Users → Add user**. Do not
+   enable public self-sign-up: every authenticated account can access the
+   shared creator workspace under the current row-level security policies.
+5. Existing invited users can sign in with a password. They can choose
+   **Forgot password?** to set or recover one, or use email-link sign-in as a
+   fallback. New invitees should accept their Supabase invitation before
+   signing in.
 
 Unauthenticated users are redirected to `/login`; signed-in users are directed
-to `/dashboard`.
+to `/dashboard`. The login screen does not create unapproved accounts.
 
 ## Database setup
 
