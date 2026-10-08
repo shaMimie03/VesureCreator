@@ -4,12 +4,26 @@ import { Card } from "@/components/ui/card";
 import { Table, TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { getDashboardData } from "@/lib/data";
 import { toMytDate } from "@/lib/utils";
+import Link from "next/link";
 
 const chartColors = ["#7c3aed", "#8b5cf6", "#c4b5fd", "#fbbf24", "#f97316", "#94a3b8"];
 
 export default async function DashboardPage() {
   const {
     totalCreators,
+    discoveredToday,
+    mcnSignedCount,
+    mcnUnknownCount,
+    notMcnSignedCount,
+    eligibleCount,
+    notEligibleCount,
+    contactedCount,
+    invitationSentCount,
+    invitationsSentToday,
+    awaitingResponseCount,
+    followUpsDueTodayCount,
+    interestedCount,
+    joinedCount,
     invitedCount,
     repliedCount,
     activeCount,
@@ -49,6 +63,40 @@ export default async function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      <Card className="space-y-5 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Creator discovery &amp; screening</h2>
+            <p className="text-sm text-slate-500">{discoveredToday.toLocaleString()} discovered today · daily processing target: 3,000</p>
+          </div>
+          <Link href="/creators?mcn_status=MCN+Unknown" className="rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50">
+            Review MCN unknown
+          </Link>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
+          {[
+            { label: "Total discovered", value: totalCreators },
+            { label: "MCN signed · excluded", value: mcnSignedCount },
+            { label: "MCN unknown · review", value: mcnUnknownCount },
+            { label: "Not MCN signed", value: notMcnSignedCount },
+            { label: "Eligible", value: eligibleCount },
+            { label: "Already contacted", value: contactedCount },
+            { label: "Invitations sent", value: invitationSentCount },
+            { label: "Invitations sent today", value: invitationsSentToday },
+            { label: "Awaiting response", value: awaitingResponseCount },
+            { label: "Follow-ups due today", value: followUpsDueTodayCount },
+            { label: "Interested", value: interestedCount },
+            { label: "Joined", value: joinedCount },
+            { label: "Not eligible", value: notEligibleCount },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-lg bg-slate-50 p-3">
+              <p className="text-xs text-slate-500">{metric.label}</p>
+              <p className="mt-1 text-2xl font-semibold text-slate-900">{metric.value.toLocaleString()}</p>
+            </div>
+          ))}
+        </div>
+      </Card>
 
       <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
         <Card className="p-5">

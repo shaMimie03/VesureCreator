@@ -39,7 +39,7 @@ export function CreatorListTable({ creators }: { creators: Creator[] }) {
         <div>
           <label htmlFor="bulk-status" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">New status</label>
           <select id="bulk-status" name="status" defaultValue="Not Contacted" className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-            {CREATOR_STATUSES.map((status) => <option key={status}>{status}</option>)}
+            {CREATOR_STATUSES.filter((status) => status !== "Invited").map((status) => <option key={status}>{status}</option>)}
           </select>
         </div>
         <div>
@@ -65,7 +65,7 @@ export function CreatorListTable({ creators }: { creators: Creator[] }) {
                 <input type="checkbox" aria-label="Select all creators on this page" checked={allSelected} onChange={(event) => toggleAll(event.target.checked)} />
               </TableHead>
               <TableHead>Name</TableHead><TableHead>Handle</TableHead><TableHead>Category</TableHead>
-              <TableHead>Followers</TableHead><TableHead>Status</TableHead><TableHead>PIC</TableHead>
+              <TableHead>Followers</TableHead><TableHead>MCN</TableHead><TableHead>Eligibility</TableHead><TableHead>Status</TableHead><TableHead>Recruitment</TableHead><TableHead>PIC</TableHead>
               <TableHead>Source</TableHead><TableHead>Last Contact</TableHead>
             </TableRow>
           </thead>
@@ -79,13 +79,24 @@ export function CreatorListTable({ creators }: { creators: Creator[] }) {
                 <TableCell>{creator.tiktok_handle ? `@${creator.tiktok_handle.replace(/^@/, "")}` : "—"}</TableCell>
                 <TableCell>{creator.category || "—"}</TableCell>
                 <TableCell>{formatNumber(creator.follower_count)}</TableCell>
+                <TableCell>
+                  <Badge className={
+                    creator.mcn_status === "MCN Signed"
+                      ? "bg-red-50 text-red-700"
+                      : creator.mcn_status === "Not MCN Signed"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-amber-50 text-amber-800"
+                  }>{creator.mcn_status ?? "MCN Unknown"}</Badge>
+                </TableCell>
+                <TableCell><Badge className={creator.eligibility_status === "Eligible" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-700"}>{creator.eligibility_status ?? "Pending"}</Badge></TableCell>
                 <TableCell><Badge className="bg-violet-50 text-violet-700">{creator.status}</Badge></TableCell>
+                <TableCell><Badge className={creator.recruitment_status === "Joined" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-700"}>{creator.recruitment_status ?? "New"}</Badge></TableCell>
                 <TableCell>{creator.pic || "—"}</TableCell>
                 <TableCell>{creator.source || "—"}</TableCell>
                 <TableCell>{toMytDate(creator.last_contact_at)}</TableCell>
               </TableRow>
             ))}
-            {creators.length === 0 && <TableRow><TableCell colSpan={9} className="py-10 text-center text-slate-500">No creators match these filters.</TableCell></TableRow>}
+            {creators.length === 0 && <TableRow><TableCell colSpan={12} className="py-10 text-center text-slate-500">No creators match these filters.</TableCell></TableRow>}
           </tbody>
         </Table>
       </div>

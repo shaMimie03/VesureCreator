@@ -43,17 +43,45 @@ export type CreatorStatus =
   | "Rejected"
   | "Cold Lead";
 
+export type McnStatus = "Checking MCN" | "MCN Signed" | "Not MCN Signed" | "MCN Unknown";
+export type EligibilityStatus = "Pending" | "Eligible" | "Not Eligible";
+export type RecruitmentStatus =
+  | "New"
+  | "Already Contacted"
+  | "Invitation Sent"
+  | "Replied"
+  | "Interested"
+  | "Not Interested"
+  | "Joined"
+  | "Follow-up Required"
+  | "No Response"
+  | "Rejected";
+
 export type Creator = {
   id: string;
   creator_name: string;
   tiktok_handle: string;
+  profile_url: string | null;
   whatsapp_number: string;
   email: string;
   category: string;
   follower_count: number;
+  following_count: number | null;
   engagement_rate: number;
+  engagement_details: string | null;
+  content_type: string | null;
+  recent_activity: string | null;
   source: string;
   status: CreatorStatus;
+  mcn_status: McnStatus;
+  mcn_company: string | null;
+  mcn_evidence: string | null;
+  mcn_checked_at: string | null;
+  eligibility_status: EligibilityStatus;
+  eligibility_score: number | null;
+  eligibility_reason: string | null;
+  recruitment_status: RecruitmentStatus;
+  discovered_at: string;
   product_id: string;
   pic: string;
   notes: string;

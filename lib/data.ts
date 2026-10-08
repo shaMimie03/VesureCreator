@@ -112,6 +112,13 @@ export async function getDashboardData() {
     }))
     .sort((left, right) => right.value - left.value);
   const now = Date.now();
+  const mytDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kuala_Lumpur",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  const startOfToday = new Date(`${mytDate}T00:00:00+08:00`).getTime();
   const firstFollowUpCutoff = now - settings.follow_up_days.first * 24 * 60 * 60 * 1000;
   const secondFollowUpCutoff = now - settings.follow_up_days.second * 24 * 60 * 60 * 1000;
   const dueToday = creators.filter((creator) => {
@@ -124,8 +131,32 @@ export async function getDashboardData() {
 
   return {
     totalCreators: creators.length,
+    discoveredToday: creators.filter((creator) => new Date(creator.discovered_at ?? creator.created_at).getTime() >= startOfToday).length,
+    mcnSignedCount: creators.filter((creator) => creator.mcn_status === "MCN Signed").length,
+    mcnUnknownCount: creators.filter((creator) => !creator.mcn_status || creator.mcn_status === "MCN Unknown" || creator.mcn_status === "Checking MCN").length,
+    notMcnSignedCount: creators.filter((creator) => creator.mcn_status === "Not MCN Signed").length,
+    eligibleCount: creators.filter((creator) => creator.eligibility_status === "Eligible" && creator.mcn_status === "Not MCN Signed").length,
+    notEligibleCount: creators.filter((creator) => creator.eligibility_status === "Not Eligible").length,
+    contactedCount: creators.filter((creator) =>
+      ["Already Contacted", "Invitation Sent", "Replied", "Interested", "Not Interested", "Joined", "Follow-up Required", "No Response"].includes(creator.recruitment_status) ||
+      !["Not Contacted", "Cold Lead"].includes(creator.status),
+    ).length,
+    invitationSentCount: creators.filter((creator) =>
+      creator.recruitment_status === "Invitation Sent" || creator.status === "Invited",
+    ).length,
+    invitationsSentToday: creators.filter((creator) =>
+      (creator.recruitment_status === "Invitation Sent" || creator.status === "Invited") &&
+      new Date(creator.last_contact_at ?? 0).getTime() >= startOfToday,
+    ).length,
+    awaitingResponseCount: creators.filter((creator) =>
+      ["Invitation Sent", "Follow-up Required", "No Response"].includes(creator.recruitment_status) &&
+      creator.status !== "Replied",
+    ).length,
+    followUpsDueTodayCount: dueToday.length,
+    interestedCount: creators.filter((creator) => creator.recruitment_status === "Interested" || creator.status === "Agreed").length,
+    joinedCount: creators.filter((creator) => creator.recruitment_status === "Joined").length,
     invitedCount: creators.filter((creator) => creator.status === "Invited").length,
-    repliedCount: creators.filter((creator) => creator.status === "Replied").length,
+    repliedCount: creators.filter((creator) => creator.recruitment_status === "Replied" || creator.status === "Replied").length,
     activeCount: creators.filter((creator) => creator.status === "Active").length,
     dueToday,
     statusBreakdown,

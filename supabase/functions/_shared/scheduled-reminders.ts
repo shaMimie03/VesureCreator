@@ -14,6 +14,8 @@ type CreatorRecord = {
   product_id: string | null;
   status: string;
   last_contact_at: string | null;
+  mcn_status: string;
+  eligibility_status: string;
 };
 
 type ContactRecord = {
@@ -197,7 +199,7 @@ export async function handleScheduledReminder(request: Request, workflow: Workfl
   for (let offset = 0; ; offset += 1000) {
     const { data, error } = await supabase
       .from("creators")
-      .select("id,creator_name,tiktok_handle,category,product_id,status,last_contact_at")
+      .select("id,creator_name,tiktok_handle,category,product_id,status,last_contact_at,mcn_status,eligibility_status")
       .in("status", statuses)
       .lte("last_contact_at", cutoff)
       .not("last_contact_at", "is", null)
@@ -207,6 +209,11 @@ export async function handleScheduledReminder(request: Request, workflow: Workfl
     const page = (data ?? []) as CreatorRecord[];
     candidates = candidates.concat(page);
     if (page.length < 1000) break;
+  }
+  if (workflow.startsWith("follow_up")) {
+    candidates = candidates.filter(
+      (creator) => creator.mcn_status === "Not MCN Signed" && creator.eligibility_status === "Eligible",
+    );
   }
 
   const { data: templatesData, error: templatesError } = await supabase

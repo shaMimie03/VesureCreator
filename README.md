@@ -102,6 +102,10 @@ Run the SQL files in the Supabase SQL Editor in sequence:
 3. [`supabase/migrations/003_schedule_reminders.sql`](./supabase/migrations/003_schedule_reminders.sql)
    installs the daily cron jobs. Only run this after deploying the Edge
    Functions and adding the required Vault secrets described below.
+4. [`supabase/migrations/004_creator_discovery_screening.sql`](./supabase/migrations/004_creator_discovery_screening.sql)
+   adds discovery profile fields, MCN evidence/review, eligibility decisions,
+   recruitment tracking, duplicate lookup, and one-invitation protection.
+   Apply it before deploying this version of the application.
 
 Migration 001 is an initial provisioning script, not a data-reset tool. Do not
 run it again on a project where it has already been applied; it can conflict
@@ -119,24 +123,54 @@ headings; recognized fields include:
 | Stored field | Accepted headings |
 | --- | --- |
 | Creator name | `Creator Name`, `Name`, `Creator` |
-| TikTok handle | `Handle`, `TikTok`, `TikTok Handle` |
+| TikTok handle or profile URL | `Handle`, `TikTok`, `TikTok Handle`; `Profile URL`, `Creator URL`, `TikTok URL` |
 | WhatsApp number | `WhatsApp`, `Phone`, `WhatsApp Number` |
 | Email | `Email`, `Email Address` |
 | Category | `Category` |
-| Followers | `Followers`, `Follower Count` |
-| Engagement rate | `Engagement`, `Engagement Rate` |
+| Followers / following | `Followers`, `Follower Count`; `Following`, `Following Count` |
+| Engagement | `Engagement`, `Engagement Rate`; `Engagement Details`, `Visible Engagement` |
+| Content / recent activity | `Content Type`, `Content Format`; `Recent Activity`, `Recent Post` |
+| MCN screening | `MCN Status`, `MCN Company`, `MCN Evidence` |
 | Source | `Source` |
 | Status | `Status` |
 | PIC | `PIC`, `Owner` |
 | Notes | `Notes` |
 
 Creator name and TikTok handle are required. Handles are normalized before
-checking for duplicates. Rows with duplicate handles already in the file or
-database are skipped and reported; import does not overwrite existing creator
-records. Unrecognized columns (for example, revenue or growth metrics) are not
-stored.
+checking for duplicates. Profile URLs and normalized usernames are both
+checked. Rows with duplicates in the file or database are skipped and
+reported; import does not overwrite existing creator records. MCN status is
+set to **MCN Unknown** unless a confirmed **MCN Signed** or **Not MCN Signed**
+value has evidence in the import row. Eligibility always starts **Pending**;
+there is no automatic score cutoff until recruitment criteria are configured.
+Imports use batches of 500 and support a 3,000-row daily processing target.
 
 For CSV files, export as **CSV UTF-8** from your spreadsheet application.
+
+## Creator discovery and screening
+
+The existing CRM pages remain in place. New creator records default to
+**MCN Unknown** and **Pending** eligibility, which means they stay out of the
+recruitment contact flow until a staff member records an evidence-based MCN
+check and marks them Eligible. MCN Signed records are excluded. Confirmed MCN
+results require evidence, and the record stores the last-checked time.
+
+The creator dashboard now includes discovery and screening totals, and the
+Creators page can filter by MCN status and eligibility. On each creator record,
+staff can review profile and engagement details, MCN evidence, eligibility
+reason, and recruitment history. The server rechecks these fields before
+recording a prospect contact; a confirmed MCN Invite is recorded once per
+creator, with database uniqueness protection against duplicate invitations.
+Unknown or signed prospects cannot be contacted through the recruitment flow.
+Recruitment follow-up reminders are also screened again before they can be
+marked sent.
+
+Discovery still starts with an authorized CSV/Excel export or manual entry.
+This application does not scrape TikTok or claim to discover 3,000 creators
+automatically: no authorized TikTok discovery integration is configured.
+Continue to use official APIs, authorized integrations, or permitted platform
+exports for intake. MCN Unknown remains a human-review queue rather than an
+assumed negative result.
 
 ## Scheduled reminders
 

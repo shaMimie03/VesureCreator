@@ -4,16 +4,25 @@ import Papa from "papaparse";
 import { readSheet } from "read-excel-file/browser";
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
+import { initialRecruitmentStatus } from "@/lib/creators/recruitment-status";
 import { createClient } from "@/lib/supabase/client";
 
 const fieldMap = {
   creator_name: ["creator_name", "name", "creator"],
   tiktok_handle: ["tiktok_handle", "handle", "tiktok"],
+  profile_url: ["profile_url", "creator_url", "tiktok_url", "profile_link"],
   whatsapp_number: ["whatsapp_number", "whatsapp", "phone"],
   email: ["email", "email_address"],
   category: ["category"],
   follower_count: ["follower_count", "followers"],
+  following_count: ["following_count", "following"],
   engagement_rate: ["engagement_rate", "engagement"],
+  engagement_details: ["engagement_details", "engagement_info", "visible_engagement"],
+  content_type: ["content_type", "content_format"],
+  recent_activity: ["recent_activity", "last_post", "recent_post"],
+  mcn_status: ["mcn_status"],
+  mcn_company: ["mcn_company", "mcn_name"],
+  mcn_evidence: ["mcn_evidence", "mcn_source", "mcn_notes"],
   source: ["source"],
   status: ["status"],
   pic: ["pic", "owner"],
@@ -29,7 +38,27 @@ function normalizeHandle(value: string) {
   const profileUrl = trimmed.match(/tiktok\.com\/@([^/?]+)/i);
   const handle = profileUrl?.[1] ?? trimmed;
   const withoutAt = handle.replace(/^@+/, "").trim();
-  return withoutAt ? `@${withoutAt}` : "";
+  return withoutAt.toLowerCase();
+}
+
+function normalizeProfileUrl(value: string, handle: string) {
+  const fallback = handle ? `https://www.tiktok.com/@${handle}` : "";
+  if (!value.trim()) return { url: fallback, invalid: false };
+  try {
+    const url = new URL(value.trim());
+    const host = url.hostname.toLowerCase();
+    const profileHandle = url.pathname.slice(2).replace(/\/+$/, "").toLowerCase();
+    if (
+      (host === "tiktok.com" || host.endsWith(".tiktok.com")) &&
+      /^\/@[^/]+\/?$/.test(url.pathname) &&
+      profileHandle === handle.toLowerCase()
+    ) {
+      return { url: `https://www.tiktok.com${url.pathname.replace(/\/+$/, "")}`, invalid: false };
+    }
+  } catch {
+    return { url: fallback, invalid: true };
+  }
+  return { url: fallback, invalid: true };
 }
 
 function parseNumber(value: string | undefined) {
@@ -49,14 +78,29 @@ function mapRow(row: Record<string, string | number | boolean | null | undefined
     if (sourceKey) matched[target] = normalized[sourceKey].trim();
   });
 
+  const mcnStatus = ["Checking MCN", "MCN Signed", "Not MCN Signed", "MCN Unknown"].includes(matched.mcn_status)
+    ? matched.mcn_status
+    : "MCN Unknown";
+
+  const normalizedHandle = normalizeHandle(matched.tiktok_handle ?? matched.profile_url ?? "");
+  const normalizedProfile = normalizeProfileUrl(matched.profile_url ?? "", normalizedHandle);
   return {
     creator_name: matched.creator_name ?? "",
-    tiktok_handle: normalizeHandle(matched.tiktok_handle ?? ""),
+    tiktok_handle: normalizedHandle,
+    profile_url: normalizedProfile.url,
+    profile_url_invalid: normalizedProfile.invalid,
     whatsapp_number: matched.whatsapp_number ?? "",
     email: matched.email ?? "",
     category: matched.category || "Other",
     follower_count: parseNumber(matched.follower_count),
+    following_count: parseNumber(matched.following_count),
     engagement_rate: parseNumber(matched.engagement_rate),
+    engagement_details: matched.engagement_details || "",
+    content_type: matched.content_type || "",
+    recent_activity: matched.recent_activity || "",
+    mcn_status: mcnStatus,
+    mcn_company: matched.mcn_company || "",
+    mcn_evidence: matched.mcn_evidence || "",
     source: matched.source || "Kalopilot",
     status: matched.status || "Not Contacted",
     pic: matched.pic || "",
@@ -146,8 +190,11 @@ export default function ImportPage() {
 
       const supabase = createClient();
       const mappedRows = readableRows.map((row) => mapRow(row));
-      const rows = mappedRows.filter((row) => row.creator_name && row.tiktok_handle);
-      const missingRequired = mappedRows.length - rows.length;
+      const rows = mappedRows.filter((row) => row.creator_name && row.tiktok_handle && !row.profile_url_invalid);
+      const missingRequired = mappedRows.filter((row) => !row.creator_name || !row.tiktok_handle).length;
+      const invalidProfileUrlRows = mappedRows.filter(
+        (row) => row.creator_name && row.tiktok_handle && row.profile_url_invalid,
+      ).length;
 
       if (rows.length === 0) {
         const exampleHeaders = Object.keys(readableRows[0] ?? {}).join(", ");
@@ -159,6 +206,7 @@ export default function ImportPage() {
           details: [
             `Headers found: ${exampleHeaders || "none"}`,
             "This file needs columns like Creator Name and Handle, with values in both columns.",
+            ...(invalidProfileUrlRows ? [`${invalidProfileUrlRows} row(s) had a Profile URL that is not a TikTok creator profile; those rows were not imported.`] : []),
           ],
         });
         return;
@@ -166,51 +214,97 @@ export default function ImportPage() {
 
       const uniqueRows = [];
       const seenHandles = new Set<string>();
+      const seenProfileUrls = new Set<string>();
+      const duplicateFileReasons: string[] = [];
       let duplicateInFile = 0;
       for (const row of rows) {
         const handleKey = row.tiktok_handle.toLowerCase();
-        if (seenHandles.has(handleKey)) {
+        const profileKey = row.profile_url.toLowerCase().replace(/\/+$/, "");
+        if (seenHandles.has(handleKey) || (profileKey && seenProfileUrls.has(profileKey))) {
           duplicateInFile += 1;
+          if (duplicateFileReasons.length < 5) {
+            duplicateFileReasons.push(`@${row.tiktok_handle} skipped: duplicate username or profile URL inside this file.`);
+          }
           continue;
         }
         seenHandles.add(handleKey);
+        if (profileKey) seenProfileUrls.add(profileKey);
         uniqueRows.push(row);
       }
 
-      const existingHandles = new Set<string>();
-      const uniqueHandles = uniqueRows.map((row) => row.tiktok_handle);
-      for (let start = 0; start < uniqueHandles.length; start += 500) {
-        const handleBatch = uniqueHandles.slice(start, start + 500);
-        const { data: existingRows, error: lookupError } = await supabase
-          .from("creators")
-          .select("tiktok_handle")
-          .in("tiktok_handle", handleBatch);
+      const duplicateHandles = new Set<string>();
+      const duplicateProfileUrls = new Set<string>();
+      for (let start = 0; start < uniqueRows.length; start += 500) {
+        const rowBatch = uniqueRows.slice(start, start + 500);
+        const { data: existingRows, error: lookupError } = await supabase.rpc("find_creator_duplicates", {
+          handle_values: rowBatch.map((row) => row.tiktok_handle.toLowerCase()),
+          profile_url_values: rowBatch.map((row) => {
+            const url = row.profile_url || `https://www.tiktok.com/@${row.tiktok_handle}`;
+            return url.toLowerCase().replace(/\/+$/, "");
+          }),
+        });
 
         if (lookupError) {
           setSummary({
             imported: 0,
             skipped: 0,
             errors: 1,
-            message: `Could not check for existing TikTok handles: ${lookupError.message}`,
+            message: `Could not check for duplicate creator handles or profile URLs: ${lookupError.message}`,
           });
           return;
         }
 
-        (existingRows ?? []).forEach((row) => existingHandles.add(row.tiktok_handle.toLowerCase()));
+        (existingRows ?? []).forEach((row: { tiktok_handle: string | null; profile_url: string | null }) => {
+          if (row.tiktok_handle) duplicateHandles.add(normalizeHandle(row.tiktok_handle));
+          if (row.profile_url) duplicateProfileUrls.add(row.profile_url.toLowerCase().replace(/\/+$/, ""));
+        });
       }
 
-      const newRows = uniqueRows.filter((row) => !existingHandles.has(row.tiktok_handle.toLowerCase()));
+      const databaseDuplicateReasons: string[] = [];
+      const newRows = uniqueRows.filter((row) => {
+        const url = (row.profile_url || `https://www.tiktok.com/@${row.tiktok_handle}`).toLowerCase().replace(/\/+$/, "");
+        const handleDuplicate = duplicateHandles.has(row.tiktok_handle.toLowerCase());
+        const urlDuplicate = duplicateProfileUrls.has(url);
+        if ((handleDuplicate || urlDuplicate) && databaseDuplicateReasons.length < 5) {
+          const reason = handleDuplicate && urlDuplicate
+            ? "username and profile URL already exist"
+            : handleDuplicate
+              ? "username already exists"
+              : "profile URL already exists";
+          databaseDuplicateReasons.push(`@${row.tiktok_handle} skipped: ${reason}.`);
+        }
+        return !handleDuplicate && !urlDuplicate;
+      });
       const databaseDuplicates = uniqueRows.length - newRows.length;
+      const missingMcnEvidence = newRows.filter(
+        (row) => ["MCN Signed", "Not MCN Signed"].includes(row.mcn_status) && !row.mcn_evidence,
+      ).length;
       let imported = 0;
       let failedRows = 0;
       const errorDetails: string[] = [];
 
       for (let start = 0; start < newRows.length; start += 500) {
-        const batch = newRows.slice(start, start + 500).map((row) => ({
-          ...row,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }));
+        const batch = newRows.slice(start, start + 500).map((row) => {
+          const now = new Date().toISOString();
+          const checkedMcn = ["MCN Signed", "Not MCN Signed"].includes(row.mcn_status) && Boolean(row.mcn_evidence);
+          const profileUrl = row.profile_url || `https://www.tiktok.com/@${row.tiktok_handle}`;
+          const mcnStatus = checkedMcn ? row.mcn_status : row.mcn_status === "Checking MCN" ? "Checking MCN" : "MCN Unknown";
+          const { profile_url_invalid: invalidProfileUrl, ...insertRow } = row;
+          if (invalidProfileUrl) throw new Error(`Invalid TikTok profile URL for @${row.tiktok_handle}.`);
+          return {
+            ...insertRow,
+            profile_url: profileUrl,
+            mcn_status: mcnStatus,
+            mcn_checked_at: checkedMcn ? now : null,
+            eligibility_status: "Pending",
+            eligibility_score: null,
+            eligibility_reason: null,
+            recruitment_status: initialRecruitmentStatus(mcnStatus, row.status),
+            created_at: now,
+            discovered_at: now,
+            updated_at: now,
+          };
+        });
         const { error: insertError } = await supabase.from("creators").insert(batch);
 
         if (insertError) {
@@ -222,7 +316,7 @@ export default function ImportPage() {
       }
 
       const malformedRowsSkipped = rowsWithParseErrors.size;
-      const skipped = missingRequired + duplicateInFile + databaseDuplicates + malformedRowsSkipped;
+      const skipped = missingRequired + invalidProfileUrlRows + duplicateInFile + databaseDuplicates + malformedRowsSkipped;
       setSummary({
         imported,
         skipped,
@@ -233,8 +327,12 @@ export default function ImportPage() {
             ? [`${malformedRowsSkipped} source row(s) skipped because CSV quotes are malformed.`]
             : []),
           ...(missingRequired ? [`${missingRequired} row(s) skipped because Creator Name or Handle was blank or not recognized.`] : []),
-          ...(duplicateInFile ? [`${duplicateInFile} duplicate handle(s) found inside the file.`] : []),
-          ...(databaseDuplicates ? [`${databaseDuplicates} handle(s) were already in the database.`] : []),
+          ...(invalidProfileUrlRows ? [`${invalidProfileUrlRows} row(s) skipped because the supplied Profile URL was not a TikTok creator profile.`] : []),
+          ...(duplicateInFile ? [`${duplicateInFile} duplicate creator(s) by normalized username or profile URL found inside the file.`] : []),
+          ...(databaseDuplicates ? [`${databaseDuplicates} creator(s) matched a handle or profile URL already in the database.`] : []),
+          ...duplicateFileReasons,
+          ...databaseDuplicateReasons,
+          ...(missingMcnEvidence ? [`${missingMcnEvidence} row(s) had a confirmed MCN status without evidence and were saved as MCN Unknown.`] : []),
           ...errorDetails,
         ],
       });
@@ -260,7 +358,7 @@ export default function ImportPage() {
       <Card className="p-6">
         <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-10 text-center">
           <p className="text-lg font-medium text-slate-700">Upload CSV file</p>
-          <p className="mt-2 text-sm text-slate-500">Upload an Excel workbook (.xlsx) or CSV. Creator Name, Handle, and Followers are supported; Revenue and Growth are not stored yet.</p>
+          <p className="mt-2 text-sm text-slate-500">Upload an authorized CSV or Excel (.xlsx) export. Imports are processed in batches of 500; 3,000 creator records per day is supported. MCN status defaults to Unknown unless the file includes a confirmed status and evidence.</p>
           <div className="mt-5 flex justify-center">
             <input
               type="file"

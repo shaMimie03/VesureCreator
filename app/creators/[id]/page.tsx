@@ -60,6 +60,8 @@ export default async function CreatorDetailPage({ params }: { params: Promise<{ 
 
   const assignedProduct = products.find((item) => item.id === creator.product_id);
   const templateNames = new Map(templates.map((template) => [template.id, template.name]));
+  const isProspect = creator.status === "Not Contacted" || creator.status === "Cold Lead";
+  const mayContactProspect = creator.mcn_status === "Not MCN Signed" && creator.eligibility_status === "Eligible";
   const timeline = [
     ...contactLog.map((entry) => ({ kind: "contact" as const, date: entry.sent_at, entry })),
     ...activity.map((entry) => ({ kind: "activity" as const, date: entry.created_at, entry })),
@@ -80,9 +82,21 @@ export default async function CreatorDetailPage({ params }: { params: Promise<{ 
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Badge className="bg-violet-50 text-violet-700">{creator.status}</Badge>
-          <MessageModal creator={creator} templates={templates} product={assignedProduct} settings={settings} />
+          {(!isProspect || mayContactProspect) && (
+            <MessageModal creator={creator} templates={templates} product={assignedProduct} settings={settings} />
+          )}
         </div>
       </div>
+
+      {isProspect && !mayContactProspect && (
+        <Card className={`border p-4 text-sm ${creator.mcn_status === "MCN Signed" ? "border-red-200 bg-red-50 text-red-900" : "border-amber-200 bg-amber-50 text-amber-900"}`} role="status">
+          {creator.mcn_status === "MCN Signed"
+            ? "Recruitment is blocked: this creator is marked MCN Signed. Do not invite."
+            : creator.mcn_status !== "Not MCN Signed"
+              ? "Contact is locked until MCN status is verified. Unknown or unchecked cases stay in manual review."
+              : "MCN status is clear, but eligibility must be marked Eligible before recruitment contact is enabled."}
+        </Card>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <CreatorEditForm creator={creator} products={products} />
@@ -91,8 +105,15 @@ export default async function CreatorDetailPage({ params }: { params: Promise<{ 
             <h2 className="mb-4 text-xl font-semibold">Creator overview</h2>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <dt className="text-slate-500">Status</dt><dd className="font-medium">{creator.status}</dd>
+              <dt className="text-slate-500">MCN status</dt><dd className="font-medium">{creator.mcn_status ?? "MCN Unknown"}</dd>
+              <dt className="text-slate-500">MCN / company</dt><dd className="font-medium">{creator.mcn_company || "Not recorded"}</dd>
+              <dt className="text-slate-500">Eligibility</dt><dd className="font-medium">{creator.eligibility_status ?? "Pending"}{creator.eligibility_score != null ? ` · Score ${creator.eligibility_score}` : ""}</dd>
+              <dt className="text-slate-500">Recruitment</dt><dd className="font-medium">{creator.recruitment_status ?? "New"}</dd>
               <dt className="text-slate-500">PIC</dt><dd className="font-medium">{creator.pic || "Unassigned"}</dd>
               <dt className="text-slate-500">Source</dt><dd className="font-medium">{creator.source || "—"}</dd>
+              <dt className="text-slate-500">Discovered</dt><dd className="font-medium">{toMytDate(creator.discovered_at ?? creator.created_at)}</dd>
+              <dt className="text-slate-500">MCN checked</dt><dd className="font-medium">{toMytDate(creator.mcn_checked_at)}</dd>
+              <dt className="text-slate-500">Profile URL</dt><dd className="font-medium">{creator.profile_url ? <a className="break-all text-violet-700 underline" href={creator.profile_url} target="_blank" rel="noreferrer">Open TikTok profile</a> : "Not recorded"}</dd>
               <dt className="text-slate-500">Product</dt><dd className="font-medium">{assignedProduct?.name ?? "Unassigned"}</dd>
               <dt className="text-slate-500">Last contact</dt><dd className="font-medium">{toMytDate(creator.last_contact_at)}</dd>
             </dl>
@@ -104,6 +125,12 @@ export default async function CreatorDetailPage({ params }: { params: Promise<{ 
             <h2 className="mb-2 text-lg font-semibold">Contact details</h2>
             <p className="text-sm text-slate-600">WhatsApp: {creator.whatsapp_number || "Not provided"}</p>
             <p className="mt-1 text-sm text-slate-600">Email: {creator.email || "Not provided"}</p>
+            <p className="mt-3 text-sm text-slate-600">Following: {creator.following_count?.toLocaleString() ?? "Not recorded"}</p>
+            <p className="mt-1 text-sm text-slate-600">Engagement: {creator.engagement_rate ?? "Not recorded"}% {creator.engagement_details ? `· ${creator.engagement_details}` : ""}</p>
+            <p className="mt-1 text-sm text-slate-600">Content type: {creator.content_type || "Not recorded"}</p>
+            <p className="mt-1 text-sm text-slate-600">Recent activity: {creator.recent_activity || "Not recorded"}</p>
+            {creator.mcn_evidence && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm text-slate-700"><strong>MCN evidence:</strong> {creator.mcn_evidence}</p>}
+            {creator.eligibility_reason && <p className="mt-2 rounded-lg bg-slate-50 p-3 text-sm text-slate-700"><strong>Eligibility reason:</strong> {creator.eligibility_reason}</p>}
           </Card>
         </div>
       </div>
